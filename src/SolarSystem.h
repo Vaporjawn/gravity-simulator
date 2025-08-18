@@ -49,6 +49,14 @@ public:
     void setTimeScale(double timeScale) { timeScale_ = timeScale; }
     double getTimeScale() const { return timeScale_; }
 
+    // 3D simulation mode
+    void set3DMode(bool enable3D);
+    bool is3DMode() const { return is3DMode_; }
+    void toggle3DMode() { is3DMode_ = !is3DMode_; }
+
+    // Get raw bodies vector for 3D physics calculations
+    std::vector<CelestialBody> getRawBodies() const;
+
     // Get simulation statistics
     double getTotalEnergy() const;
     sf::Vector2f getCenterOfMass() const;
@@ -60,6 +68,7 @@ private:
     std::vector<std::unique_ptr<CelestialBody>> bodies_;
     bool paused_;
     double timeScale_; // Speed multiplier for simulation time
+    bool is3DMode_;    // Whether to use 3D simulation mode
 
     // Physics integration method
     void updatePhysics(double deltaTime);
@@ -72,6 +81,17 @@ private:
     void createPlanet(const std::string& name, double mass, double radius,
                      double orbitDistance, double orbitVelocity,
                      const sf::Color& color, float visualScale = 1.0f);
+
+    // Moon creation methods
+    void createMoon(const std::string& moonName, double mass, double radius,
+                   const std::string& parentPlanetName, double orbitDistance,
+                   double orbitVelocity, const sf::Color& color, float visualScale = 1.0f);
+    void addMoonsToEarth();
+    void addMoonsToMars();
+    void addMoonsToJupiter();
+    void addMoonsToSaturn();
+    void addMoonsToUranus();
+    void addMoonsToNeptune();
 
     // Store initial conditions for reset functionality
     void storeInitialConditions();

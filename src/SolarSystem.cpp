@@ -3,7 +3,7 @@
 #include <iostream>
 #include <cmath>
 
-SolarSystem::SolarSystem() : paused_(false), timeScale_(1.0) {
+SolarSystem::SolarSystem() : paused_(false), timeScale_(1.0), is3DMode_(false) {
 }
 
 void SolarSystem::initialize() {
@@ -48,12 +48,18 @@ void SolarSystem::initialize() {
     createPlanet("Neptune", 17.1 * Physics::EARTH_MASS, 24622e3,
                 30.1 * Physics::AU, 5.43e3, sf::Color(65, 105, 225), 1.5f);
 
+    // Add moons to planets
+    addMoonsToEarth();
+    addMoonsToMars();
+    addMoonsToJupiter();
+    addMoonsToSaturn();
+    // Uranus and Neptune moons are quite small, so we'll skip them for now
+
     storeInitialConditions();
 
     std::cout << "Solar system initialized with " << bodies_.size() << " celestial bodies." << std::endl;
-}
-
-void SolarSystem::update(double deltaTime) {
+    std::cout << "Starting in 2D mode. Press M to toggle to 3D mode." << std::endl;
+}void SolarSystem::update(double deltaTime) {
     if (!paused_) {
         updatePhysics(deltaTime * timeScale_);
     }
@@ -85,6 +91,35 @@ CelestialBody* SolarSystem::findBody(const std::string& name) {
         }
     }
     return nullptr;
+}
+
+std::vector<CelestialBody> SolarSystem::getRawBodies() const {
+    std::vector<CelestialBody> rawBodies;
+    rawBodies.reserve(bodies_.size());
+
+    for (const auto& body : bodies_) {
+        rawBodies.push_back(*body);
+    }
+
+    return rawBodies;
+}
+
+void SolarSystem::set3DMode(bool enable) {
+    is3DMode_ = enable;  // Actually set the mode flag!
+
+    if (enable) {
+        // Initialize 3D positions from 2D positions when switching to 3D
+        for (auto& body : bodies_) {
+            sf::Vector2f pos2D = body->getPosition();
+            body->setPosition3D(Vector3f(pos2D.x, pos2D.y, 0.0f));
+
+            sf::Vector2f vel2D = body->getVelocity();
+            body->setVelocity3D(Vector3f(vel2D.x, vel2D.y, 0.0f));
+
+            // Set previous position for Verlet integration
+            body->setPreviousPosition3D(body->getPosition3D() - body->getVelocity3D() * 0.016f);
+        }
+    }
 }
 
 double SolarSystem::getTotalEnergy() const {
@@ -132,13 +167,21 @@ void SolarSystem::reset() {
 }
 
 void SolarSystem::updatePhysics(double deltaTime) {
-    // Calculate gravitational forces between all bodies
-    calculateGravitationalForces();
+    if (is3DMode_) {
+        // 3D physics update
+        for (auto& body : bodies_) {
+            body->update3D(getRawBodies(), static_cast<float>(deltaTime));
+        }
+    } else {
+        // 2D physics update
+        // Calculate gravitational forces between all bodies
+        calculateGravitationalForces();
 
-    // Update all bodies
-    for (auto& body : bodies_) {
-        body->update(deltaTime);
-        body->resetForces();
+        // Update all bodies
+        for (auto& body : bodies_) {
+            body->update(deltaTime);
+            body->resetForces();
+        }
     }
 }
 
@@ -172,6 +215,8 @@ void SolarSystem::createSun() {
     // Make the Sun visually larger for better visibility
     sun->setVisualRadius(20.0f);
 
+    std::cout << "Created Sun at center with visual radius 20.0 pixels" << std::endl;
+
     addBody(std::move(sun));
 }
 
@@ -201,7 +246,13 @@ void SolarSystem::createPlanet(const std::string& name, double mass, double radi
 
     // Scale visual radius for better visibility
     float baseVisualRadius = Physics::metersToPixels(radius);
-    planet->setVisualRadius(std::max(3.0f, baseVisualRadius * visualScale));
+    float finalVisualRadius = std::max(4.0f, baseVisualRadius * visualScale);
+    planet->setVisualRadius(finalVisualRadius);
+
+    // Debug output
+    std::cout << "Created planet " << name
+              << " at distance " << simDistance << " pixels"
+              << " with visual radius " << finalVisualRadius << " pixels" << std::endl;
 
     addBody(std::move(planet));
 }
@@ -224,4 +275,100 @@ void SolarSystem::restoreInitialConditions() {
         bodies_[i]->setVelocity(initialConditions_[i].velocity);
         bodies_[i]->resetForces();
     }
+}
+
+void SolarSystem::createMoon(const std::string& moonName, double mass, double radius,
+                            const std::string& parentPlanetName, double orbitDistance,
+                            double orbitVelocity, const sf::Color& color, float visualScale) {
+    // Find the parent planet
+    CelestialBody* parentPlanet = findBody(parentPlanetName);
+    if (!parentPlanet) {
+        std::cerr << "Warning: Could not find parent planet " << parentPlanetName
+                  << " for moon " << moonName << std::endl;
+        return;
+    }
+
+    // Calculate moon's position relative to parent planet
+    sf::Vector2f parentPos = parentPlanet->getPosition();
+    sf::Vector2f parentVel = parentPlanet->getVelocity();
+
+    // Convert orbital distance to simulation coordinates
+    float simDistance = Physics::metersToPixels(orbitDistance);
+
+    // Place moon initially to the right of the planet
+    sf::Vector2f moonPosition = parentPos + sf::Vector2f(simDistance, 0.0f);
+
+    // Calculate orbital velocity around the parent planet
+    double planetMass = parentPlanet->getMass();
+    double moonOrbitalSpeed = Physics::calculateOrbitalVelocity(planetMass, orbitDistance);
+
+    // Add parent planet's velocity plus moon's orbital velocity (perpendicular)
+    sf::Vector2f moonVelocity = parentVel + sf::Vector2f(0.0f, static_cast<float>(moonOrbitalSpeed));
+
+    auto moon = std::make_unique<CelestialBody>(
+        moonName,
+        mass,
+        radius,
+        moonPosition,
+        moonVelocity,
+        color
+    );
+
+    // Scale visual radius for better visibility (moons are usually very small)
+    float baseVisualRadius = Physics::metersToPixels(radius);
+    moon->setVisualRadius(std::max(2.0f, baseVisualRadius * visualScale));
+
+    addBody(std::move(moon));
+}
+
+void SolarSystem::addMoonsToEarth() {
+    // Luna (Earth's Moon)
+    createMoon("Luna", 7.342e22, 1737.4e3, "Earth", 384400e3, 1.022e3,
+               sf::Color::White, 8.0f);
+}
+
+void SolarSystem::addMoonsToMars() {
+    // Phobos
+    createMoon("Phobos", 1.0659e16, 11.1e3, "Mars", 9376e3, 2.138e3,
+               sf::Color(139, 139, 139), 15.0f);
+
+    // Deimos
+    createMoon("Deimos", 1.4762e15, 6.2e3, "Mars", 23463e3, 1.351e3,
+               sf::Color(105, 105, 105), 18.0f);
+}
+
+void SolarSystem::addMoonsToJupiter() {
+    // Io
+    createMoon("Io", 8.9319e22, 1821.6e3, "Jupiter", 421700e3, 17.334e3,
+               sf::Color(255, 255, 0), 4.0f);
+
+    // Europa
+    createMoon("Europa", 4.7998e22, 1560.8e3, "Jupiter", 671034e3, 13.740e3,
+               sf::Color(173, 216, 230), 4.5f);
+
+    // Ganymede
+    createMoon("Ganymede", 1.4819e23, 2634.1e3, "Jupiter", 1070412e3, 10.880e3,
+               sf::Color(139, 119, 101), 3.0f);
+
+    // Callisto
+    createMoon("Callisto", 1.0759e23, 2410.3e3, "Jupiter", 1882709e3, 8.204e3,
+               sf::Color(64, 64, 64), 3.2f);
+}
+
+void SolarSystem::addMoonsToSaturn() {
+    // Titan
+    createMoon("Titan", 1.3452e23, 2574e3, "Saturn", 1221830e3, 5.57e3,
+               sf::Color(255, 165, 0), 3.5f);
+
+    // Enceladus (smaller but interesting)
+    createMoon("Enceladus", 1.08022e20, 252.1e3, "Saturn", 238020e3, 12.635e3,
+               sf::Color::White, 12.0f);
+}
+
+void SolarSystem::addMoonsToUranus() {
+    // Add major moons if desired - currently empty
+}
+
+void SolarSystem::addMoonsToNeptune() {
+    // Add Triton if desired - currently empty
 }

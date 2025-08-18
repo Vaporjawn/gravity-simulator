@@ -7,7 +7,9 @@
 Renderer::Renderer(sf::RenderWindow& window)
     : window_(window), zoom_(1.0f), center_(0.0f, 0.0f),
       showTrails_(true), showLabels_(true), showVelocityVectors_(false),
-      showForceVectors_(false), showGrid_(false), maxTrailLength_(1000) {
+      showForceVectors_(false), showGrid_(false), showSpacetimeWarping_(false),
+      maxTrailLength_(1000),
+      cameraZ_(-1000.0f), cameraRotationX_(0.0f), cameraRotationY_(0.0f) {
 
     // Initialize view
     view_ = window_.getDefaultView();
@@ -38,6 +40,11 @@ void Renderer::render(const SolarSystem& solarSystem, double deltaTime) {
         renderGrid();
     }
 
+    // Render spacetime warping grid if enabled
+    if (showSpacetimeWarping_) {
+        renderSpacetimeWarpingGrid(solarSystem);
+    }
+
     // Render trails first (so they appear behind bodies)
     if (showTrails_) {
         for (size_t i = 0; i < trails_.size(); ++i) {
@@ -48,7 +55,7 @@ void Renderer::render(const SolarSystem& solarSystem, double deltaTime) {
     // Render celestial bodies
     const auto& bodies = solarSystem.getBodies();
     for (size_t i = 0; i < bodies.size(); ++i) {
-        renderCelestialBody(*bodies[i], i);
+        renderCelestialBody(*bodies[i], i, solarSystem);
     }
 
     // Render UI elements in screen coordinates
@@ -107,8 +114,18 @@ float Renderer::getVisualScale() const {
     return std::max(0.5f, std::min(3.0f, 1.0f / zoom_));
 }
 
-void Renderer::renderCelestialBody(const CelestialBody& body, size_t bodyIndex) {
-    sf::Vector2f pos = body.getPosition();
+void Renderer::renderCelestialBody(const CelestialBody& body, size_t bodyIndex, const SolarSystem& solarSystem) {
+    sf::Vector2f pos;
+
+    if (solarSystem.is3DMode()) {
+        // Use 3D projection
+        Vector3f pos3D = body.getPosition3D();
+        pos = project3DTo2D(pos3D, solarSystem);
+    } else {
+        // Use 2D position directly
+        pos = body.getPosition();
+    }
+
     float radius = calculateBodyVisualRadius(body);
 
     // Set up circle shape
@@ -223,16 +240,29 @@ void Renderer::renderUI(const SolarSystem& solarSystem, double deltaTime) {
     ss << "Bodies: " << solarSystem.getBodyCount() << "\n";
     ss << "Time Scale: " << solarSystem.getTimeScale() << "x\n";
     ss << "Zoom: " << zoom_ << "x\n";
+    ss << "Mode: " << (solarSystem.is3DMode() ? "3D" : "2D") << "\n";
+    ss << "Spacetime: " << (showSpacetimeWarping_ ? "ON" : "OFF") << "\n";
+    if (solarSystem.is3DMode()) {
+        ss << "Camera Z: " << cameraZ_ << "\n";
+        ss << "Pitch: " << (cameraRotationX_ * 180.0f / 3.14159f) << "°\n";
+        ss << "Yaw: " << (cameraRotationY_ * 180.0f / 3.14159f) << "°\n";
+    }
     ss << "Status: " << (solarSystem.isPaused() ? "PAUSED" : "RUNNING") << "\n\n";
 
     ss << "Controls:\n";
     ss << "WASD: Move camera\n";
     ss << "Mouse wheel: Zoom\n";
+    if (solarSystem.is3DMode()) {
+        ss << "Page Up/Down: Move Z-axis\n";
+        ss << "I/K: Pitch, J/O: Yaw\n";
+    }
     ss << "Space: Pause/Resume\n";
     ss << "R: Reset simulation\n";
     ss << "T: Toggle trails\n";
     ss << "L: Toggle labels\n";
     ss << "G: Toggle grid\n";
+    ss << "M: Toggle 2D/3D mode\n";
+    ss << "X: Toggle spacetime warping\n";
     ss << "+/-: Adjust time scale\n";
     ss << "ESC: Exit\n";
 
@@ -313,4 +343,181 @@ sf::Color Renderer::adjustColorAlpha(const sf::Color& color, sf::Uint8 alpha) co
     sf::Color adjustedColor = color;
     adjustedColor.a = alpha;
     return adjustedColor;
+}
+
+float Renderer::calculateSpacetimeCurvature(const sf::Vector2f& position,
+                                          const SolarSystem& solarSystem) const {
+    const auto& bodies = solarSystem.getBodies();
+    float totalCurvature = 0.0f;
+
+    // Calculate gravitational field strength at this point
+    for (const auto& body : bodies) {
+        sf::Vector2f bodyPos = body->getPosition();
+        sf::Vector2f diff = position - bodyPos;
+        float distance = Physics::magnitude(diff);
+
+        // Prevent division by zero
+        if (distance < 1.0f) {
+            distance = 1.0f;
+        }
+
+        // Schwarzschild radius approximation for curvature visualization
+        // This is a simplified model for educational purposes
+        float mass = body->getMass();
+        float schwarzschildRadius = 2.0f * mass / (3e8 * 3e8); // Simplified calculation
+
+        // Calculate curvature based on gravitational potential
+        float curvature = schwarzschildRadius / (distance * distance);
+        totalCurvature += curvature;
+    }
+
+    // Normalize curvature for visualization
+    return std::min(1.0f, totalCurvature * 1e15f); // Scale factor for visibility
+}
+
+void Renderer::renderSpacetimeWarpingGrid(const SolarSystem& solarSystem) {
+    if (!showSpacetimeWarping_) {
+        return;
+    }
+
+    sf::FloatRect bounds = getViewBounds();
+    float gridSpacing = 100.0f / zoom_; // Adaptive grid spacing for spacetime
+
+    // Create vertex array for the warped grid
+    sf::VertexArray grid(sf::Lines);
+
+    // Draw vertical grid lines with curvature
+    float startX = std::floor(bounds.left / gridSpacing) * gridSpacing;
+    for (float x = startX; x < bounds.left + bounds.width; x += gridSpacing) {
+        std::vector<sf::Vertex> vertices;
+
+        float startY = bounds.top;
+        float endY = bounds.top + bounds.height;
+        int segments = 20; // Number of segments per line for smooth curves
+
+        for (int i = 0; i <= segments; ++i) {
+            float t = static_cast<float>(i) / static_cast<float>(segments);
+            float y = startY + t * (endY - startY);
+
+            // Calculate curvature at this point
+            sf::Vector2f gridPoint(x, y);
+            float curvature = calculateSpacetimeCurvature(gridPoint, solarSystem);
+
+            // Apply warping effect to x position
+            float warpOffset = curvature * 50.0f * std::sin(t * 3.14159f); // Sine wave warping
+            float warpedX = x + warpOffset;
+
+            // Color based on curvature intensity
+            sf::Uint8 intensity = static_cast<sf::Uint8>(255 * (1.0f - curvature));
+            sf::Color lineColor(intensity, intensity, 255, 128); // Blue tinted, semi-transparent
+
+            vertices.push_back(sf::Vertex(sf::Vector2f(warpedX, y), lineColor));
+        }
+
+        // Add vertices to grid
+        for (size_t i = 0; i < vertices.size() - 1; ++i) {
+            grid.append(vertices[i]);
+            grid.append(vertices[i + 1]);
+        }
+    }
+
+    // Draw horizontal grid lines with curvature
+    float startY = std::floor(bounds.top / gridSpacing) * gridSpacing;
+    for (float y = startY; y < bounds.top + bounds.height; y += gridSpacing) {
+        std::vector<sf::Vertex> vertices;
+
+        float startX2 = bounds.left;
+        float endX = bounds.left + bounds.width;
+        int segments = 20; // Number of segments per line for smooth curves
+
+        for (int i = 0; i <= segments; ++i) {
+            float t = static_cast<float>(i) / static_cast<float>(segments);
+            float x = startX2 + t * (endX - startX2);
+
+            // Calculate curvature at this point
+            sf::Vector2f gridPoint(x, y);
+            float curvature = calculateSpacetimeCurvature(gridPoint, solarSystem);
+
+            // Apply warping effect to y position
+            float warpOffset = curvature * 50.0f * std::sin(t * 3.14159f); // Sine wave warping
+            float warpedY = y + warpOffset;
+
+            // Color based on curvature intensity
+            sf::Uint8 intensity = static_cast<sf::Uint8>(255 * (1.0f - curvature));
+            sf::Color lineColor(intensity, intensity, 255, 128); // Blue tinted, semi-transparent
+
+            vertices.push_back(sf::Vertex(sf::Vector2f(x, warpedY), lineColor));
+        }
+
+        // Add vertices to grid
+        for (size_t i = 0; i < vertices.size() - 1; ++i) {
+            grid.append(vertices[i]);
+            grid.append(vertices[i + 1]);
+        }
+    }
+
+    window_.draw(grid);
+}
+
+// 3D Camera control methods
+void Renderer::setCameraPosition3D(float x, float y, float z) {
+    center_ = sf::Vector2f(x, y);
+    cameraZ_ = z;
+}
+
+void Renderer::moveCameraZ(float deltaZ) {
+    cameraZ_ += deltaZ;
+    // Clamp camera Z to reasonable bounds
+    cameraZ_ = std::max(100.0f, std::min(10000.0f, cameraZ_));
+}
+
+void Renderer::rotateCameraX(float deltaAngle) {
+    cameraRotationX_ += deltaAngle;
+    // Clamp rotation to reasonable bounds (-90 to 90 degrees)
+    cameraRotationX_ = std::max(-1.57f, std::min(1.57f, cameraRotationX_));
+}
+
+void Renderer::rotateCameraY(float deltaAngle) {
+    cameraRotationY_ += deltaAngle;
+    // Keep rotation in 0-2π range
+    while (cameraRotationY_ > 6.28f) cameraRotationY_ -= 6.28f;
+    while (cameraRotationY_ < 0.0f) cameraRotationY_ += 6.28f;
+}
+
+sf::Vector2f Renderer::project3DTo2D(const Vector3f& position3D, const SolarSystem& solarSystem) const {
+    if (!solarSystem.is3DMode()) {
+        // In 2D mode, just return the X,Y coordinates
+        return sf::Vector2f(position3D.x, position3D.y);
+    }
+
+    // Apply 3D camera transformations
+    // First translate by camera position
+    float x = position3D.x - center_.x;
+    float y = position3D.y - center_.y;
+    float z = position3D.z - cameraZ_;
+
+    // Apply rotations
+    // Rotation around X-axis (pitch)
+    float cosX = std::cos(cameraRotationX_);
+    float sinX = std::sin(cameraRotationX_);
+    float y_rotX = y * cosX - z * sinX;
+    float z_rotX = y * sinX + z * cosX;
+
+    // Rotation around Y-axis (yaw)
+    float cosY = std::cos(cameraRotationY_);
+    float sinY = std::sin(cameraRotationY_);
+    float x_rot = x * cosY + z_rotX * sinY;
+    float z_rot = -x * sinY + z_rotX * cosY;
+
+    // Perspective projection
+    float perspective_distance = 1000.0f; // Distance to "screen"
+    if (z_rot < -perspective_distance) z_rot = -perspective_distance + 1.0f; // Prevent division by zero
+
+    float depth_factor = perspective_distance / (perspective_distance + z_rot);
+
+    // Apply the depth factor and add back the camera center offset
+    float projected_x = x_rot * depth_factor + center_.x;
+    float projected_y = y_rotX * depth_factor + center_.y;
+
+    return sf::Vector2f(projected_x, projected_y);
 }

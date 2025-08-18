@@ -1,6 +1,7 @@
 #pragma once
 #include <SFML/Graphics.hpp>
 #include "SolarSystem.h"
+#include "CelestialBody.h"
 #include <vector>
 #include <deque>
 
@@ -24,6 +25,15 @@ public:
     sf::Vector2f getCenter() const { return center_; }
     void moveCamera(const sf::Vector2f& offset);
 
+    // 3D Camera controls
+    void setCameraPosition3D(float x, float y, float z);
+    void moveCameraZ(float deltaZ);
+    void rotateCameraX(float deltaAngle);
+    void rotateCameraY(float deltaAngle);
+    float getCameraZ() const { return cameraZ_; }
+    float getCameraRotationX() const { return cameraRotationX_; }
+    float getCameraRotationY() const { return cameraRotationY_; }
+
     // Convert between screen coordinates and world coordinates
     sf::Vector2f screenToWorld(const sf::Vector2i& screenPos) const;
     sf::Vector2i worldToScreen(const sf::Vector2f& worldPos) const;
@@ -43,6 +53,13 @@ public:
 
     void setShowGrid(bool show) { showGrid_ = show; }
     bool getShowGrid() const { return showGrid_; }
+
+    void setShowSpacetimeWarping(bool show) { showSpacetimeWarping_ = show; }
+    bool getShowSpacetimeWarping() const { return showSpacetimeWarping_; }
+
+    // Alternative method names for compatibility
+    void setSpacetimeWarpingEnabled(bool enabled) { showSpacetimeWarping_ = enabled; }
+    bool isSpacetimeWarpingEnabled() const { return showSpacetimeWarping_; }
 
     // Trail management
     void clearTrails();
@@ -64,12 +81,18 @@ private:
     float zoom_;
     sf::Vector2f center_;
 
+    // 3D Camera properties
+    float cameraZ_;            // Z-axis position for 3D viewing
+    float cameraRotationX_;    // Rotation around X-axis (pitch)
+    float cameraRotationY_;    // Rotation around Y-axis (yaw)
+
     // Visual options
     bool showTrails_;
     bool showLabels_;
     bool showVelocityVectors_;
     bool showForceVectors_;
     bool showGrid_;
+    bool showSpacetimeWarping_;
 
     // Trail system
     struct TrailPoint {
@@ -86,12 +109,13 @@ private:
     sf::Text labelText_;
 
     // Private methods
-    void renderCelestialBody(const CelestialBody& body, size_t bodyIndex);
+    void renderCelestialBody(const CelestialBody& body, size_t bodyIndex, const SolarSystem& solarSystem);
     void renderTrail(size_t bodyIndex);
     void renderLabel(const CelestialBody& body);
     void renderVelocityVector(const CelestialBody& body);
     void renderForceVector(const CelestialBody& body);
     void renderGrid();
+    void renderSpacetimeWarpingGrid(const SolarSystem& solarSystem);
     void renderUI(const SolarSystem& solarSystem, double deltaTime);
 
     void updateTrails(const SolarSystem& solarSystem);
@@ -101,4 +125,8 @@ private:
     bool loadFont();
     float calculateBodyVisualRadius(const CelestialBody& body) const;
     sf::Color adjustColorAlpha(const sf::Color& color, sf::Uint8 alpha) const;
+    float calculateSpacetimeCurvature(const sf::Vector2f& point, const SolarSystem& solarSystem) const;
+
+    // 3D projection helper
+    sf::Vector2f project3DTo2D(const Vector3f& position3D, const SolarSystem& solarSystem) const;
 };

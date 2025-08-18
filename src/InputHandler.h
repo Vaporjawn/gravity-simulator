@@ -44,6 +44,13 @@ private:
         bool zoomOut = false;
         bool speedUp = false;
         bool slowDown = false;
+        // 3D movement keys
+        bool moveUp3D = false;     // Page Up - move camera up in Z
+        bool moveDown3D = false;   // Page Down - move camera down in Z
+        bool rotateUp = false;     // I key - rotate camera up (pitch)
+        bool rotateDown = false;   // K key - rotate camera down (pitch)
+        bool rotateLeft = false;   // J key - rotate camera left (yaw)
+        bool rotateRight = false;  // L key - rotate camera right (yaw)
     } keyState_;
 
     // Input sensitivity settings
@@ -65,6 +72,7 @@ private:
     void handleCameraMovement(double deltaTime);
     void handleZoomInput(double deltaTime);
     void handleTimeScaleInput(double deltaTime);
+    void handle3DCameraMovement(double deltaTime);
 
     // Helper methods
     void toggleVisualOption(const std::string& option);

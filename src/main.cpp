@@ -27,6 +27,10 @@ int main() {
     // Initialize the solar system
     solarSystem.initialize();
 
+    // Set up initial camera view to show the entire solar system
+    renderer.setZoom(0.5f);  // Zoom out to see more of the solar system
+    renderer.setCenter(sf::Vector2f(0.0f, 0.0f));  // Center on the Sun
+
     // Show help message
     inputHandler.showHelpMessage();
 
